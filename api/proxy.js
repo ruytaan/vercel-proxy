@@ -62,8 +62,8 @@ module.exports = (req, res) => {
     target = TARGET_MAP[subdomain];
   }
 
+  // Trả về trang loader khi truy cập /
   if (!target && (urlPath === "/" || urlPath === "")) {
-    // Trả về trang loader thay vì redirect
     return res.send(`
 <!DOCTYPE html>
 <html>
@@ -71,25 +71,21 @@ module.exports = (req, res) => {
   <meta charset="UTF-8">
   <title>Zing MP3 Proxy</title>
   <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body { font-family: Arial, sans-serif; }
-    #loader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #170f23; display: flex; align-items: center; justify-content: center; color: white; z-index: 9999; }
-    #content { width: 100%; height: 100vh; border: none; }
+    body { margin: 0; background: #170f23; color: white; font-family: Arial; }
+    #loader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; z-index: 9999; }
   </style>
 </head>
 <body>
   <div id="loader">Loading Zing MP3...</div>
-  <div id="content"></div>
   
   <script>
     (function(){
       const PROXY = "${PROXY_DOMAIN}";
       
-      // Load Zing HTML qua proxy
       fetch(PROXY + "/proxy/zing/")
         .then(r => r.text())
         .then(html => {
-          // Rewrite tất cả URL trong HTML
+          // Rewrite URL trong HTML
           html = html.replace(/https:\\/\\/zingmp3\\.vn/g, PROXY + "/proxy/zing");
           html = html.replace(/https:\\/\\/api\\.zingmp3\\.vn/g, PROXY + "/proxy/api");
           html = html.replace(/https:\\/\\/ac\\.zingmp3\\.vn/g, PROXY + "/proxy/ac");
@@ -100,51 +96,19 @@ module.exports = (req, res) => {
           html = html.replace(/https:\\/\\/zjs\\.zmdcdn\\.me/g, PROXY + "/proxy/zjs");
           html = html.replace(/https:\\/\\/zads\\.zmdcdn\\.me/g, PROXY + "/proxy/zads");
           
-          // Inject script patch ngay đầu
-          const patchScript = \`<script>
-(function(){
-  const P="${PROXY_DOMAIN}";
-  const M={"https://zingmp3.vn":"/proxy/zing","https://api.zingmp3.vn":"/proxy/api","https://ac.zingmp3.vn":"/proxy/ac","https://streaming.zingmp3.vn":"/proxy/streaming","https://static-zmp3.zmdcdn.me":"/proxy/static","https://photo-zmp3.zmdcdn.me":"/proxy/photo","https://photo-resize-zmp3.zmdcdn.me":"/proxy/photo-resize","https://zjs.zmdcdn.me":"/proxy/zjs","https://zads.zmdcdn.me":"/proxy/zads"};
-  function r(u){if(typeof u!=='string')return u;for(const[d,p]of Object.entries(M))if(u.startsWith(d))return u.replace(d,P+p);return u}
-  
-  // Override ALL network APIs
-  const o=fetch;window.fetch=function(u,opt){return o(r(u),opt)};
-  const x=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){return x.call(this,m,r(u))};
-  const w=WebSocket;window.WebSocket=function(u,p){return new w(r(u),p)};
-  
-  // Override createElement
-  const c=document.createElement;document.createElement=function(t){
-    const e=c.call(document,t);
-    if(['img','script','link','audio','video','source','iframe'].includes(t.toLowerCase())){
-      const s=e.setAttribute;e.setAttribute=function(n,v){
-        if(['src','href','data-src','poster'].includes(n))v=r(v);
-        return s.call(this,n,v)
-      };
-    }
-    return e
-  };
-  
-  console.log("[Proxy] Network APIs patched");
-})();
-<\\/script>\`;
+          // Inject patch script
+          const patch = '<scr' + 'ipt>(function(){const P="' + PROXY + '";const M={"https://zingmp3.vn":"/proxy/zing","https://api.zingmp3.vn":"/proxy/api","https://ac.zingmp3.vn":"/proxy/ac","https://streaming.zingmp3.vn":"/proxy/streaming","https://static-zmp3.zmdcdn.me":"/proxy/static","https://photo-zmp3.zmdcdn.me":"/proxy/photo","https://photo-resize-zmp3.zmdcdn.me":"/proxy/photo-resize","https://zjs.zmdcdn.me":"/proxy/zjs","https://zads.zmdcdn.me":"/proxy/zads"};function r(u){if(typeof u!=="string")return u;for(const[d,p]of Object.entries(M))if(u.startsWith(d))return u.replace(d,P+p);return u}const o=fetch;window.fetch=function(u,opt){return o(r(u),opt)};const x=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){return x.call(this,m,r(u))};const c=document.createElement;document.createElement=function(t){const e=c.call(document,t);if(["img","script","link","audio","video","source"].includes(t.toLowerCase())){const s=e.setAttribute;e.setAttribute=function(n,v){if(["src","href","data-src","poster"].includes(n))v=r(v);return s.call(this,n,v)}}return e};console.log("[Proxy] Active");})();</scr' + 'ipt>';
           
-          html = html.replace(/<head>/i, '<head>' + patchScript);
+          html = html.replace(/<head>/i, '<head>' + patch);
           
-          // Render vào div
-          document.getElementById('content').innerHTML = html;
-          document.getElementById('loader').style.display = 'none';
-          
-          // Execute scripts
-          const scripts = document.getElementById('content').querySelectorAll('script');
-          scripts.forEach(s => {
-            if (s.src) {
-              const newScript = document.createElement('script');
-              newScript.src = s.src;
-              document.head.appendChild(newScript);
-            } else {
-              eval(s.textContent);
-            }
-          });
+          // Dùng document.write để browser tự execute scripts
+          document.open();
+          document.write(html);
+          document.close();
+        })
+        .catch(err => {
+          console.error("Load failed:", err);
+          document.getElementById('loader').textContent = "Error: " + err.message;
         });
     })();
   </script>
@@ -169,11 +133,10 @@ module.exports = (req, res) => {
     onProxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
       const contentType = proxyRes.headers['content-type'] || '';
       
-      // Nếu là HTML, rewrite URL + inject script
+      // Nếu là HTML, rewrite URL
       if (contentType.includes('text/html')) {
         let body = responseBuffer.toString('utf8');
         
-        // Rewrite URL trong HTML
         body = body.replace(/https:\/\/zingmp3\.vn/g, PROXY_DOMAIN + '/proxy/zing');
         body = body.replace(/https:\/\/api\.zingmp3\.vn/g, PROXY_DOMAIN + '/proxy/api');
         body = body.replace(/https:\/\/ac\.zingmp3\.vn/g, PROXY_DOMAIN + '/proxy/ac');
