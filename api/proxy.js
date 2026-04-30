@@ -1,6 +1,5 @@
 const { createProxyMiddleware } = require("http-proxy-middleware");
 
-
 const TARGET_MAP = {
   "/proxy/m/": "https://m.zingmp3.vn",
   "/proxy/zing/": "https://zingmp3.vn",
