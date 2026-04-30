@@ -1,5 +1,11 @@
 {
-  "rewrites": [
-    { "source": "/proxy/(.*)", "destination": "/api/proxy.js" }
+  "routes": [
+    { "src": "^/api/(.*)", "dest": "/api/proxy?target=api&path=$1" },
+    { "src": "^/streaming/(.*)", "dest": "/api/proxy?target=streaming&path=$1" },
+    { "src": "^/zjs/(.*)", "dest": "/api/proxy?target=zjs&path=$1" },
+    { "src": "^/static/(.*)", "dest": "/api/proxy?target=static&path=$1" },
+    { "src": "^/photo/(.*)", "dest": "/api/proxy?target=photo&path=$1" },
+
+    { "src": "^/(.*)", "dest": "/api/proxy?target=zing&path=$1" }
   ]
 }
