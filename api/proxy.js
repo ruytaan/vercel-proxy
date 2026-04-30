@@ -14,7 +14,8 @@ const TARGET_MAP = {
 
 module.exports = (req, res) => {
   console.log("=== REQUEST ===");
-  console.log("URL:", req.url);
+  console.log("Full URL:", req.url);
+  console.log("Path:", req.path || "N/A");
   console.log("Method:", req.method);
   console.log("Host:", req.headers.host);
   console.log("===============");
@@ -29,19 +30,44 @@ module.exports = (req, res) => {
     return res.status(204).end();
   }
 
+  // Lấy pathname không có query string
+  const fullUrl = req.url || "";
+  const urlPath = fullUrl.split("?")[0]; // Bỏ query string
+  
   let target = null;
-  let newPath = req.url;
+  let newPath = fullUrl;
 
+  // Tìm prefix khớp
   for (const [prefix, url] of Object.entries(TARGET_MAP)) {
-    if (req.url.startsWith(prefix)) {
+    if (urlPath.startsWith(prefix)) {
       target = url;
-      newPath = req.url.replace(prefix, "/");
+      newPath = fullUrl.replace(prefix, "/");
       break;
     }
   }
 
-  // Nếu không khớp prefix, thử detect từ subdomain
+  // Fallback: nếu URL là / hoặc không khớp, redirect về /proxy/m/
   if (!target) {
+    console.log("No prefix match. URL:", urlPath);
+    
+    // Nếu là root /, redirect về proxy m
+    if (urlPath === "/" || urlPath === "") {
+      console.log("Redirect / → /proxy/m/");
+      return res.redirect(302, "/proxy/m/");
+    }
+    
+    // Nếu là /proxy/m (thiếu dấu / cuối), redirect
+    if (urlPath === "/proxy/m") {
+      console.log("Redirect /proxy/m → /proxy/m/");
+      return res.redirect(302, "/proxy/m/");
+    }
+    
+    // Nếu là /service-worker.js hoặc file tĩnh, trả 404 hoặc serve từ public
+    if (urlPath.startsWith("/service-worker") || urlPath.startsWith("/sw")) {
+      return res.status(404).send("Service worker not implemented");
+    }
+    
+    // Cố gắng detect từ subdomain
     const host = req.headers.host || "";
     const subdomain = host.split('.')[0];
     
@@ -57,18 +83,15 @@ module.exports = (req, res) => {
     target = SUBDOMAIN_MAP[subdomain];
     if (target) {
       console.log("Fallback by subdomain:", subdomain, "→", target);
+    } else {
+      return res.status(404).json({ 
+        error: "Unknown proxy target",
+        url: req.url,
+        path: urlPath,
+        hint: "URL phải bắt đầu bằng /proxy/m/, /proxy/api/, v.v...",
+        example: "https://security4all.vercel.app/proxy/m/"
+      });
     }
-  }
-
-  // Nếu vẫn không có target, trả lỗi chi tiết
-  if (!target) {
-    console.log("ERROR: No target found for:", req.url);
-    return res.status(404).json({ 
-      error: "Unknown proxy target",
-      url: req.url,
-      host: req.headers.host,
-      hint: "URL phải bắt đầu bằng /proxy/m/, /proxy/api/, /proxy/static/, v.v..."
-    });
   }
 
   req.url = newPath;
