@@ -63,7 +63,94 @@ module.exports = (req, res) => {
   }
 
   if (!target && (urlPath === "/" || urlPath === "")) {
-    return res.redirect(302, "/proxy/zing/");
+    // Trả về trang loader thay vì redirect
+    return res.send(`
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Zing MP3 Proxy</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { font-family: Arial, sans-serif; }
+    #loader { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: #170f23; display: flex; align-items: center; justify-content: center; color: white; z-index: 9999; }
+    #content { width: 100%; height: 100vh; border: none; }
+  </style>
+</head>
+<body>
+  <div id="loader">Loading Zing MP3...</div>
+  <div id="content"></div>
+  
+  <script>
+    (function(){
+      const PROXY = "${PROXY_DOMAIN}";
+      
+      // Load Zing HTML qua proxy
+      fetch(PROXY + "/proxy/zing/")
+        .then(r => r.text())
+        .then(html => {
+          // Rewrite tất cả URL trong HTML
+          html = html.replace(/https:\\/\\/zingmp3\\.vn/g, PROXY + "/proxy/zing");
+          html = html.replace(/https:\\/\\/api\\.zingmp3\\.vn/g, PROXY + "/proxy/api");
+          html = html.replace(/https:\\/\\/ac\\.zingmp3\\.vn/g, PROXY + "/proxy/ac");
+          html = html.replace(/https:\\/\\/streaming\\.zingmp3\\.vn/g, PROXY + "/proxy/streaming");
+          html = html.replace(/https:\\/\\/static-zmp3\\.zmdcdn\\.me/g, PROXY + "/proxy/static");
+          html = html.replace(/https:\\/\\/photo-zmp3\\.zmdcdn\\.me/g, PROXY + "/proxy/photo");
+          html = html.replace(/https:\\/\\/photo-resize-zmp3\\.zmdcdn\\.me/g, PROXY + "/proxy/photo-resize");
+          html = html.replace(/https:\\/\\/zjs\\.zmdcdn\\.me/g, PROXY + "/proxy/zjs");
+          html = html.replace(/https:\\/\\/zads\\.zmdcdn\\.me/g, PROXY + "/proxy/zads");
+          
+          // Inject script patch ngay đầu
+          const patchScript = \`<script>
+(function(){
+  const P="${PROXY_DOMAIN}";
+  const M={"https://zingmp3.vn":"/proxy/zing","https://api.zingmp3.vn":"/proxy/api","https://ac.zingmp3.vn":"/proxy/ac","https://streaming.zingmp3.vn":"/proxy/streaming","https://static-zmp3.zmdcdn.me":"/proxy/static","https://photo-zmp3.zmdcdn.me":"/proxy/photo","https://photo-resize-zmp3.zmdcdn.me":"/proxy/photo-resize","https://zjs.zmdcdn.me":"/proxy/zjs","https://zads.zmdcdn.me":"/proxy/zads"};
+  function r(u){if(typeof u!=='string')return u;for(const[d,p]of Object.entries(M))if(u.startsWith(d))return u.replace(d,P+p);return u}
+  
+  // Override ALL network APIs
+  const o=fetch;window.fetch=function(u,opt){return o(r(u),opt)};
+  const x=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){return x.call(this,m,r(u))};
+  const w=WebSocket;window.WebSocket=function(u,p){return new w(r(u),p)};
+  
+  // Override createElement
+  const c=document.createElement;document.createElement=function(t){
+    const e=c.call(document,t);
+    if(['img','script','link','audio','video','source','iframe'].includes(t.toLowerCase())){
+      const s=e.setAttribute;e.setAttribute=function(n,v){
+        if(['src','href','data-src','poster'].includes(n))v=r(v);
+        return s.call(this,n,v)
+      };
+    }
+    return e
+  };
+  
+  console.log("[Proxy] Network APIs patched");
+})();
+<\\/script>\`;
+          
+          html = html.replace(/<head>/i, '<head>' + patchScript);
+          
+          // Render vào div
+          document.getElementById('content').innerHTML = html;
+          document.getElementById('loader').style.display = 'none';
+          
+          // Execute scripts
+          const scripts = document.getElementById('content').querySelectorAll('script');
+          scripts.forEach(s => {
+            if (s.src) {
+              const newScript = document.createElement('script');
+              newScript.src = s.src;
+              document.head.appendChild(newScript);
+            } else {
+              eval(s.textContent);
+            }
+          });
+        });
+    })();
+  </script>
+</body>
+</html>
+    `);
   }
 
   if (!target) {
@@ -82,70 +169,9 @@ module.exports = (req, res) => {
     onProxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
       const contentType = proxyRes.headers['content-type'] || '';
       
-      // Nếu là HTML, inject script NGAY SAU <html> hoặc đầu <head>
+      // Nếu là HTML, rewrite URL + inject script
       if (contentType.includes('text/html')) {
         let body = responseBuffer.toString('utf8');
-        
-        // Script patch - chạy TRƯỚC mọi thứ
-        const injectScript = `<script>
-(function(){
-  const P="${PROXY_DOMAIN}";
-  const M={"https://zingmp3.vn":"/proxy/zing","https://api.zingmp3.vn":"/proxy/api","https://ac.zingmp3.vn":"/proxy/ac","https://streaming.zingmp3.vn":"/proxy/streaming","https://static-zmp3.zmdcdn.me":"/proxy/static","https://photo-zmp3.zmdcdn.me":"/proxy/photo","https://photo-resize-zmp3.zmdcdn.me":"/proxy/photo-resize","https://zjs.zmdcdn.me":"/proxy/zjs","https://zads.zmdcdn.me":"/proxy/zads"};
-  function r(u){if(typeof u!=='string')return u;for(const[d,p]of Object.entries(M))if(u.startsWith(d))return u.replace(d,P+p);return u}
-  
-  // Patch fetch ngay lập tức
-  const o=window.fetch;
-  window.fetch=function(u,opt){return o(r(u),opt)};
-  
-  // Patch XHR
-  const x=XMLHttpRequest.prototype.open;
-  XMLHttpRequest.prototype.open=function(m,u){return x.call(this,m,r(u))};
-  
-  // Patch WebSocket
-  const w=window.WebSocket;
-  window.WebSocket=function(u,p){return new w(r(u),p)};
-  
-  // Patch createElement
-  const c=document.createElement;
-  document.createElement=function(t){
-    const e=c.call(document,t);
-    const l=t.toLowerCase();
-    if(['img','script','link','audio','video','source','iframe'].includes(l)){
-      const s=e.setAttribute;
-      e.setAttribute=function(n,v){
-        if(['src','href','data-src','poster'].includes(n))v=r(v);
-        return s.call(this,n,v)
-      };
-      // Patch property
-      ['src','href'].forEach(p=>{
-        const d=Object.getOwnPropertyDescriptor(e.__proto__,p);
-        if(d&&d.set){
-          Object.defineProperty(e,p,{
-            set:function(v){d.set.call(this,r(v))},
-            get:d.get
-          });
-        }
-      });
-    }
-    return e
-  };
-  
-  // Patch URL constructor
-  const U=window.URL;
-  window.URL=function(url,base){return new U(r(url),base)};
-  
-  console.log("[Proxy] Patched all APIs");
-})();
-</script>`;
-        
-        // Inject NGAY SAU <html> hoặc đầu <head>
-        if (body.includes('<html>')) {
-          body = body.replace(/<html[^>]*>/i, '$&' + injectScript);
-        } else if (body.includes('<head>')) {
-          body = body.replace(/<head>/i, '<head>' + injectScript);
-        } else {
-          body = injectScript + body;
-        }
         
         // Rewrite URL trong HTML
         body = body.replace(/https:\/\/zingmp3\.vn/g, PROXY_DOMAIN + '/proxy/zing');
