@@ -3,6 +3,7 @@ const { createProxyMiddleware, responseInterceptor } = require("http-proxy-middl
 const TARGET_MAP = {
   "zing": "https://zingmp3.vn",
   "api": "https://api.zingmp3.vn",
+  "ac": "https://ac.zingmp3.vn",
   "streaming": "https://streaming.zingmp3.vn",
   "photo": "https://photo-zmp3.zmdcdn.me",
   "photo-resize": "https://photo-resize-zmp3.zmdcdn.me",
@@ -33,34 +34,25 @@ module.exports = (req, res) => {
   if (proxyMatch) {
     const proxyName = proxyMatch[1];
     const remainingPath = proxyMatch[2];
-    
     if (TARGET_MAP[proxyName]) {
       target = TARGET_MAP[proxyName];
       newPath = "/" + remainingPath + urlObj.search;
-      if (newPath === "/" && !remainingPath) {
-        newPath = "/";
-      }
+      if (newPath === "/" && !remainingPath) newPath = "/";
     }
   }
 
   if (!target) {
     const targetParam = urlObj.searchParams.get("target");
     const pathParam = urlObj.searchParams.get("path");
-    
     if (targetParam && TARGET_MAP[targetParam]) {
       target = TARGET_MAP[targetParam];
       newPath = "/" + (pathParam || "");
-      
       const newSearchParams = new URLSearchParams();
       for (const [key, value] of urlObj.searchParams) {
-        if (key !== "target" && key !== "path") {
-          newSearchParams.append(key, value);
-        }
+        if (key !== "target" && key !== "path") newSearchParams.append(key, value);
       }
       const queryString = newSearchParams.toString();
-      if (queryString) {
-        newPath += "?" + queryString;
-      }
+      if (queryString) newPath += "?" + queryString;
     }
   }
 
@@ -75,86 +67,112 @@ module.exports = (req, res) => {
   }
 
   if (!target) {
-    return res.status(404).json({ 
-      error: "Unknown proxy target",
-      url: req.url,
-      path: urlPath,
-      hint: "Use /proxy/zing/ or ?target=api&path=xxx"
-    });
+    return res.status(404).json({ error: "Unknown proxy target", url: req.url });
   }
 
   req.url = newPath;
-
-  console.log(`[Proxy] ${req.method} ${newPath} → ${target}`);
 
   createProxyMiddleware({
     target,
     changeOrigin: true,
     secure: true,
     followRedirects: false,
-    
-    // QUAN TRỌNG: Tự xử lý response để rewrite HTML
     selfHandleResponse: true,
     
     onProxyRes: responseInterceptor(async (responseBuffer, proxyRes, req, res) => {
       const contentType = proxyRes.headers['content-type'] || '';
       
-      // CORS headers
-      res.setHeader("Access-Control-Allow-Origin", "*");
-      res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD");
-      res.setHeader("Access-Control-Allow-Headers", "*");
-      res.setHeader("Access-Control-Allow-Credentials", "true");
-      
-      // Nếu là HTML, inject script và rewrite URL
+      // Nếu là HTML, inject script NGAY SAU <html> hoặc đầu <head>
       if (contentType.includes('text/html')) {
         let body = responseBuffer.toString('utf8');
         
-        // Inject proxy intercept script ngay sau <head>
-        const injectScript = `
-<script>
+        // Script patch - chạy TRƯỚC mọi thứ
+        const injectScript = `<script>
 (function(){
-  const PROXY="${PROXY_DOMAIN}";
-  const MAP={"https://zingmp3.vn":"/proxy/zing","https://api.zingmp3.vn":"/proxy/api","https://streaming.zingmp3.vn":"/proxy/streaming","https://static-zmp3.zmdcdn.me":"/proxy/static","https://photo-zmp3.zmdcdn.me":"/proxy/photo","https://photo-resize-zmp3.zmdcdn.me":"/proxy/photo-resize","https://zjs.zmdcdn.me":"/proxy/zjs","https://zads.zmdcdn.me":"/proxy/zads"};
-  function r(u){for(const[d,p]of Object.entries(MAP))if(u.startsWith(d))return u.replace(d,PROXY+p);return u}
-  const o=window.fetch;window.fetch=function(u,opt){return o(r(u),opt)};
-  const x=XMLHttpRequest.prototype.open;XMLHttpRequest.prototype.open=function(m,u){return x.call(this,m,r(u))};
-  const c=document.createElement;document.createElement=function(t){const e=c.call(document,t);if(['img','script','link','audio','video','source'].includes(t.toLowerCase())){const s=e.setAttribute;e.setAttribute=function(n,v){if(['src','href','data-src','poster'].includes(n))v=r(v);return s.call(this,n,v)}}return e};
+  const P="${PROXY_DOMAIN}";
+  const M={"https://zingmp3.vn":"/proxy/zing","https://api.zingmp3.vn":"/proxy/api","https://ac.zingmp3.vn":"/proxy/ac","https://streaming.zingmp3.vn":"/proxy/streaming","https://static-zmp3.zmdcdn.me":"/proxy/static","https://photo-zmp3.zmdcdn.me":"/proxy/photo","https://photo-resize-zmp3.zmdcdn.me":"/proxy/photo-resize","https://zjs.zmdcdn.me":"/proxy/zjs","https://zads.zmdcdn.me":"/proxy/zads"};
+  function r(u){if(typeof u!=='string')return u;for(const[d,p]of Object.entries(M))if(u.startsWith(d))return u.replace(d,P+p);return u}
+  
+  // Patch fetch ngay lập tức
+  const o=window.fetch;
+  window.fetch=function(u,opt){return o(r(u),opt)};
+  
+  // Patch XHR
+  const x=XMLHttpRequest.prototype.open;
+  XMLHttpRequest.prototype.open=function(m,u){return x.call(this,m,r(u))};
+  
+  // Patch WebSocket
+  const w=window.WebSocket;
+  window.WebSocket=function(u,p){return new w(r(u),p)};
+  
+  // Patch createElement
+  const c=document.createElement;
+  document.createElement=function(t){
+    const e=c.call(document,t);
+    const l=t.toLowerCase();
+    if(['img','script','link','audio','video','source','iframe'].includes(l)){
+      const s=e.setAttribute;
+      e.setAttribute=function(n,v){
+        if(['src','href','data-src','poster'].includes(n))v=r(v);
+        return s.call(this,n,v)
+      };
+      // Patch property
+      ['src','href'].forEach(p=>{
+        const d=Object.getOwnPropertyDescriptor(e.__proto__,p);
+        if(d&&d.set){
+          Object.defineProperty(e,p,{
+            set:function(v){d.set.call(this,r(v))},
+            get:d.get
+          });
+        }
+      });
+    }
+    return e
+  };
+  
+  // Patch URL constructor
+  const U=window.URL;
+  window.URL=function(url,base){return new U(r(url),base)};
+  
+  console.log("[Proxy] Patched all APIs");
 })();
 </script>`;
         
-        body = body.replace(/<head>/i, '<head>' + injectScript);
-        body = body.replace(/<head\s+[^>]*>/i, '$&' + injectScript);
+        // Inject NGAY SAU <html> hoặc đầu <head>
+        if (body.includes('<html>')) {
+          body = body.replace(/<html[^>]*>/i, '$&' + injectScript);
+        } else if (body.includes('<head>')) {
+          body = body.replace(/<head>/i, '<head>' + injectScript);
+        } else {
+          body = injectScript + body;
+        }
         
-        // Rewrite tất cả URL trong HTML
+        // Rewrite URL trong HTML
         body = body.replace(/https:\/\/zingmp3\.vn/g, PROXY_DOMAIN + '/proxy/zing');
         body = body.replace(/https:\/\/api\.zingmp3\.vn/g, PROXY_DOMAIN + '/proxy/api');
+        body = body.replace(/https:\/\/ac\.zingmp3\.vn/g, PROXY_DOMAIN + '/proxy/ac');
         body = body.replace(/https:\/\/streaming\.zingmp3\.vn/g, PROXY_DOMAIN + '/proxy/streaming');
         body = body.replace(/https:\/\/static-zmp3\.zmdcdn\.me/g, PROXY_DOMAIN + '/proxy/static');
         body = body.replace(/https:\/\/photo-zmp3\.zmdcdn\.me/g, PROXY_DOMAIN + '/proxy/photo');
         body = body.replace(/https:\/\/photo-resize-zmp3\.zmdcdn\.me/g, PROXY_DOMAIN + '/proxy/photo-resize');
         body = body.replace(/https:\/\/zjs\.zmdcdn\.me/g, PROXY_DOMAIN + '/proxy/zjs');
         body = body.replace(/https:\/\/zads\.zmdcdn\.me/g, PROXY_DOMAIN + '/proxy/zads');
-        
-        // Rewrite URL trong JSON/script cũng
-        body = body.replace(/"https:\\\/\\\/zingmp3\.vn\\\/"/g, '"' + PROXY_DOMAIN.replace(/\//g, '\\/') + '\\/proxy\\/zing\\/');
-        body = body.replace(/'https:\\\/\\\/zingmp3\.vn\\\/'/g, "'" + PROXY_DOMAIN.replace(/\//g, '\\/') + '\\/proxy\\/zing\\/');
         
         return body;
       }
       
-      // Nếu là JS, rewrite URL trong code
-      if (contentType.includes('javascript') || contentType.includes('json')) {
+      // Nếu là JS, rewrite URL
+      if (contentType.includes('javascript')) {
         let body = responseBuffer.toString('utf8');
-        
         body = body.replace(/https:\/\/zingmp3\.vn/g, PROXY_DOMAIN + '/proxy/zing');
         body = body.replace(/https:\/\/api\.zingmp3\.vn/g, PROXY_DOMAIN + '/proxy/api');
+        body = body.replace(/https:\/\/ac\.zingmp3\.vn/g, PROXY_DOMAIN + '/proxy/ac');
         body = body.replace(/https:\/\/streaming\.zingmp3\.vn/g, PROXY_DOMAIN + '/proxy/streaming');
         body = body.replace(/https:\/\/static-zmp3\.zmdcdn\.me/g, PROXY_DOMAIN + '/proxy/static');
         body = body.replace(/https:\/\/photo-zmp3\.zmdcdn\.me/g, PROXY_DOMAIN + '/proxy/photo');
         body = body.replace(/https:\/\/photo-resize-zmp3\.zmdcdn\.me/g, PROXY_DOMAIN + '/proxy/photo-resize');
         body = body.replace(/https:\/\/zjs\.zmdcdn\.me/g, PROXY_DOMAIN + '/proxy/zjs');
         body = body.replace(/https:\/\/zads\.zmdcdn\.me/g, PROXY_DOMAIN + '/proxy/zads');
-        
         return body;
       }
       
@@ -165,7 +183,6 @@ module.exports = (req, res) => {
       proxyReq.setHeader("User-Agent", "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15");
       proxyReq.setHeader("Referer", "https://zingmp3.vn");
       proxyReq.setHeader("Origin", "https://zingmp3.vn");
-      
       proxyReq.removeHeader("sec-fetch-site");
       proxyReq.removeHeader("sec-fetch-mode");
       proxyReq.removeHeader("sec-fetch-dest");
