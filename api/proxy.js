@@ -29,7 +29,7 @@ module.exports = (req, res) => {
   // Áp dụng CORS trước
   corsMiddleware(req, res, () => {
     const path = req.url;
-    let target = "https://m.zingmp3.vn";
+    let target = "https://zingmp3.vn";
     let newPath = path;
     
     for (const [prefix, url] of Object.entries(TARGET_MAP)) {
