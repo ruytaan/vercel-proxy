@@ -10,7 +10,7 @@ const TARGET_MAP = {
 
 module.exports = (req, res) => {
   const path = req.url;
-  let target = "https://m.zingmp3.vn";
+  let target = "https://zingmp3.vn";
   
   for (const [prefix, url] of Object.entries(TARGET_MAP)) {
     if (path.startsWith(prefix)) {
